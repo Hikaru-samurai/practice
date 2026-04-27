@@ -643,10 +643,6 @@
     </div>
     <div class="header-course" id="headerCourse"></div>
     <div class="header-right">
-      <div class="api-key-wrap">
-        <span class="api-key-label">APIキー：</span>
-        <input type="password" id="apiKeyInput" class="api-key-input" placeholder="sk-ant-..." autocomplete="off">
-      </div>
       <button class="btn btn-outline" id="themeToggleBtn" onclick="toggleTheme()">🌙 ダーク</button>
       <button class="btn btn-outline" onclick="openSettingsModal()">⚙️ 設定</button>
     </div>
@@ -747,7 +743,7 @@
   <!-- 4. Claudeフィードバック -->
   <section>
     <div class="card">
-      <div class="section-title">Claude コーチからのフィードバック</div>
+      <div class="section-title">コーチからのフィードバック</div>
       <div class="feedback-box" id="feedbackBox">
         <div class="feedback-icon">🤖</div>
         <div class="feedback-text feedback-placeholder" id="feedbackText">
@@ -1011,60 +1007,71 @@
   }
 
   // ============================================================
-  //  CLAUDE API
+  //  RULE-BASED FEEDBACK（APIキー不要・完全無料）
   // ============================================================
   async function getFeedback(record) {
-    const apiKey = document.getElementById('apiKeyInput').value.trim();
-    if (!apiKey) {
-      return '※ APIキーが未入力です。ヘッダーのAPIキー欄に入力するとフィードバックを受け取れます。';
-    }
-
     const settings = loadSettings();
-    const courseName = settings?.courseName || '不明';
     const dailyGoal = settings?.dailyGoalHours || 3;
+    const logs = loadLog();
+    const streak = calcStreak(logs);
+    const { hours, stars, learned, stuck } = record;
+    const ratio = hours / dailyGoal;
 
-    const userMsg = `
-【受講コース】${courseName}
-【日付】${record.date}
-【今日学んだこと】${record.learned}
-【学習時間】${record.hours}時間（1日の目標：${dailyGoal}時間）
-【詰まっていること・疑問】${record.stuck || 'なし'}
-【達成度】${record.stars}/5
+    // ── 学習内容コメント ──
+    const contentComments = [
+      `「${learned.slice(0, 20)}${learned.length > 20 ? '…' : ''}」に取り組んだんですね。着実に知識が積み重なっています！`,
+      `今日の学習内容をしっかり記録できています。アウトプットを意識するとさらに定着しますよ。`,
+      `学んだことを言語化できているのが素晴らしいです。この習慣が長期的な成長につながります。`,
+      `内容を振り返って記録する姿勢、とても良いです。理解を深めるため、今日学んだことを人に説明してみましょう。`,
+      `一歩一歩、確実に前進しています。今日の学びを明日に活かしていきましょう！`,
+    ];
+    const contentMsg = contentComments[Math.floor(Math.random() * contentComments.length)];
 
-上記の学習記録に対して、以下の観点で100〜150字程度のフィードバックを日本語でお願いします：
-・今日の学習内容への一言コメント
-・詰まっていることへのヒント（入力がある場合）
-・目標学習時間に対しての達成状況へのコメント（超えていれば称賛、未達なら励まし）
-・明日への一言応援メッセージ
-`.trim();
-
-    try {
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': apiKey,
-          'anthropic-version': '2023-06-01',
-          'anthropic-dangerous-direct-browser-access': 'true'
-        },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 400,
-          system: 'あなたはプログラミング・AI・フリーランス独立など幅広いスキルを教えるスクールの学習コーチです。受講生の学習記録と目標に対して、具体的・前向き・簡潔にフィードバックしてください。',
-          messages: [{ role: 'user', content: userMsg }]
-        })
-      });
-
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        return `APIエラー: ${err.error?.message || res.statusText}`;
-      }
-
-      const data = await res.json();
-      return data.content?.[0]?.text || 'フィードバックを取得できませんでした。';
-    } catch(e) {
-      return `通信エラー: ${e.message}`;
+    // ── 詰まりポイントへのヒント ──
+    let stuckMsg = '';
+    if (stuck) {
+      const hints = [
+        `「${stuck.slice(0, 20)}${stuck.length > 20 ? '…' : ''}」で詰まっているんですね。公式ドキュメントやエラーメッセージを読み直し、小さく動くコードで試してみましょう。`,
+        `詰まっている箇所は成長のチャンスです！検索キーワードを変えてみるか、コミュニティ（DOJO）で質問してみましょう。`,
+        `疑問を言語化できていること自体が大切です。コードを最小限に絞って再現してみると解決の糸口が見えますよ。`,
+        `難しい壁にぶつかっているときは、一度別の簡単なサンプルで基礎を確認するのが近道です。焦らず一つずつ解決していきましょう。`,
+      ];
+      stuckMsg = ' ' + hints[Math.floor(Math.random() * hints.length)];
     }
+
+    // ── 目標達成コメント ──
+    let goalMsg = '';
+    if (ratio >= 1.5) {
+      goalMsg = ` 目標の${Math.round(ratio * 100)}%達成、素晴らしい集中力です！無理しすぎず、しっかり休息も取ってくださいね。`;
+    } else if (ratio >= 1.0) {
+      goalMsg = ` 今日は目標時間をクリア！この調子を維持していきましょう。`;
+    } else if (ratio >= 0.6) {
+      goalMsg = ` 目標まであと少し届きませんでしたが、${hours}時間の積み重ねは確実に力になっています。明日また頑張りましょう！`;
+    } else {
+      goalMsg = ` 今日は短めでも、学習を継続できたことが大切です。無理のないペースで続けることが最強の戦略です。`;
+    }
+
+    // ── streak応援 ──
+    let streakMsg = '';
+    if (streak >= 7) {
+      streakMsg = ` ${streak}日連続学習中、本当に素晴らしいです！その継続力こそが最大の武器です。`;
+    } else if (streak >= 3) {
+      streakMsg = ` ${streak}日連続達成中！習慣になってきた証拠です。明日もこの流れを続けましょう。`;
+    } else {
+      streakMsg = ` 明日も一歩ずつ前へ。あなたのペースで着実に進んでいきましょう！`;
+    }
+
+    // ── 達成度（stars）別メッセージ ──
+    const starMsgs = {
+      1: '今日は調子が出なかったかもしれませんが、記録したこと自体が前進です。',
+      2: 'まだ掴みきれていない部分があっても大丈夫。繰り返すことで必ず定着します。',
+      3: '着実に理解が進んでいますね。もう一歩踏み込めると更に良くなります！',
+      4: '良い手応えを感じているのが伝わります。この調子で続けていきましょう！',
+      5: '完璧な達成感、最高です！今日の自信を明日の学習に繋げてください！',
+    };
+    const starMsg = ' ' + (starMsgs[stars] || '');
+
+    return `${contentMsg}${stuckMsg}${goalMsg}${starMsg}${streakMsg}`;
   }
 
   function setFeedbackLoading() {
